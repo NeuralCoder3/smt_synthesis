@@ -1,0 +1,86 @@
+from metalift.ir import *
+from metalift.analysis_new import VariableTracker, analyze
+
+# x y z, swap register, le flag, ge flag
+StateType = lambda: TupleT(Int(), Int(), Int(), Int(), Bool(), Bool())
+
+def targetLang():
+  state = Var("state", StateType())
+  x = TupleGet(state, IntLit(0))
+  y = TupleGet(state, IntLit(1))
+  z = TupleGet(state, IntLit(2))
+  swap = TupleGet(state, IntLit(3))
+  le = TupleGet(state, IntLit(4))
+  ge = TupleGet(state, IntLit(5))
+  
+  swap12Gt = FnDecl("swap12Gt",
+                StateType(),
+               Ite(Gt(x, y), Tuple(y, x, z, swap, le, ge), state),
+                state)
+  swap13Gt = FnDecl("swap13Gt",
+                StateType(),
+                 Ite(Gt(x, z), Tuple(z, y, x, swap, le, ge), state),
+                 state)
+  swap23Gt = FnDecl("swap23Gt",
+                StateType(),
+                 Ite(Gt(y, z), Tuple(x, z, y, swap, le, ge), state),
+                 state)
+  return [swap12Gt, swap13Gt, swap23Gt]
+
+x = Var("x", Int())
+y = Var("y", Int())
+z = Var("z", Int())
+
+init = Tuple(x, y, z, IntLit(0), BoolLit(False), BoolLit(False))
+
+# res = Call("f", StateType(), init)
+res = Call("f", StateType(), x, y, z)
+rx = TupleGet(res, IntLit(0))
+ry = TupleGet(res, IntLit(1))
+rz = TupleGet(res, IntLit(2))
+
+correct = And(
+  Le(rx, ry),
+  Le(ry, rz)
+)
+  
+
+print(correct.toSMT())
+
+lang = targetLang()
+for f in lang:
+  print(f.name())
+
+grammar = init
+
+for i in range(5):
+  calls = [
+    Call(f.name(), StateType(), grammar) for f in lang
+  ]
+  grammar = Choose(
+    *calls,
+    grammar # no-op
+  )
+
+
+synthF = Synth(
+  "f", # function name
+  grammar, # body
+  # init, # arguments
+  x,y,z
+)
+
+
+from metalift.synthesize_auto import synthesize
+result = synthesize(
+  "example", # name of the synthesis problem
+  lang, # list of utility functions
+  [x,y,z], # list of variables to verify over
+  [synthF], # list of functions to synthesize
+  [], # list of predicates
+  correct, # verification condition
+  [synthF], # type metadata for functions to synthesize, just pass the Synth node otherwise
+  unboundedInts=True, # verify against the full range of integers (by default integers are restricted to a fixed number of bits)
+)
+
+print(result)
